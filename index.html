@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ThermoWatch — Remote Dashboard</title>
+<title>ThermoWatch — Live Data from Firebase</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
 :root{
@@ -70,23 +70,23 @@ tr:hover td{background:var(--surface2)}
 .signal-bar{display:inline-flex;align-items:flex-end;gap:2px;height:14px;vertical-align:middle;margin-right:4px}
 .sb{width:3px;border-radius:1px;background:var(--border)}
 .sb.on{background:var(--green)}
-.remote-badge{background:rgba(88,166,255,.15);color:var(--blue);padding:2px 8px;border-radius:20px;font-size:10px;margin-left:8px}
+.live-badge{background:rgba(63,185,80,.15);color:var(--green);padding:2px 8px;border-radius:20px;font-size:10px;margin-left:8px}
 </style>
 </head>
 <body>
 <div class="topbar">
-  <div class="logo">Thermo<span>Watch</span> <span style="font-size:11px;color:var(--muted)">// Remote Dashboard</span>
-    <span class="remote-badge">📡 Live from Firebase</span>
+  <div class="logo">Thermo<span>Watch</span> <span style="font-size:11px;color:var(--muted)">// Live from Firebase</span>
+    <span class="live-badge">● LIVE DATA</span>
   </div>
   <div class="wifi-badge">
     <div class="wifi-dot" id="wdot"></div>
-    <span id="wlabel">Firebase Connected</span>
+    <span id="wlabel">Firebase</span>
   </div>
 </div>
 
 <div class="container">
   <div class="toolbar">
-    <span class="section-title">Live readings</span>
+    <span class="section-title">Live readings (ESP32 → Firebase)</span>
     <span id="lastUpdate" class="refresh-note">—</span>
     <button onclick="fetchData()" class="btn btn-primary">&#8635; Refresh</button>
   </div>
@@ -139,41 +139,30 @@ tr:hover td{background:var(--surface2)}
   <div class="table-wrap">
     <table>
       <thead><tr><th>#</th><th>Time</th><th>Temp °C</th><th>Humidity %</th><th>Heat Index *</th><th>Status</th></tr></thead>
-      <tbody id="history-body"><tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">Loading from Firebase...</td></tr></tbody>
+      <tbody id="history-body"><tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">⏳ Loading live data from Firebase...<br><span style="font-size:11px">Make sure your ESP32 is running and connected to WiFi</span></td></tr</tbody>
     </table>
   </div>
   <p style="font-size:11px;color:var(--muted);margin-bottom:20px">
-    * Heat Index sourced from Open-Meteo weather API (Cavite, PH). Falls back to DHT11 calculation if API is unreachable.
+    * Heat Index sourced from Open-Meteo weather API (Cavite, PH). Data is pushed from your ESP32 every 5 minutes.
   </p>
 </div>
 
 <div class="status-bar">
   ThermoWatch v2 &nbsp;·&nbsp; ESP32 + DHT11 &nbsp;·&nbsp;
-  Auto-refresh every 30 s &nbsp;·&nbsp;
-  <a href="https://thermowatch0-default-rtdb.asia-southeast1.firebasedatabase.app/live.json" target="_blank" style="color:var(--blue)">View Raw Firebase Data</a>
+  Auto-refresh every 30s &nbsp;·&nbsp;
+  📡 <strong>READING FROM FIREBASE</strong> &nbsp;·&nbsp;
+  <a href="https://thermowatch0-default-rtdb.asia-southeast1.firebasedatabase.app/live.json" target="_blank" style="color:var(--blue)">View Raw JSON</a>
 </div>
 
 <script>
-// Read directly from your Firebase database
+// YOUR FIREBASE URL - reading directly from your database
 const FIREBASE_URL = 'https://thermowatch0-default-rtdb.asia-southeast1.firebasedatabase.app/live.json';
 
-// Store history (will build from multiple Firebase entries if available)
-let historyArray = [];
-
-function statusColor(s){
-  if(s==='Danger'||s==='Very Hot') return 'red';
-  if(s==='Warm') return 'orange';
-  if(s==='Comfortable') return 'green';
+function statusColor(s) {
+  if (s === 'Danger' || s === 'Very Hot') return 'red';
+  if (s === 'Warm') return 'orange';
+  if (s === 'Comfortable') return 'green';
   return 'blue';
-}
-
-function setSignalBars(rssi){
-  if (!rssi && rssi !== 0) return;
-  const lvl = rssi >= -50 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : rssi >= -85 ? 1 : 0;
-  for(let i=1;i<=4;i++){
-    const el = document.getElementById('sb'+i);
-    if(el) el.className = 'sb' + (i <= lvl ? ' on' : '');
-  }
 }
 
 async function fetchData() {
@@ -181,33 +170,35 @@ async function fetchData() {
     const response = await fetch(FIREBASE_URL);
     const data = await response.json();
     
-    if (!data || !data.temp) {
-      console.log('Waiting for ESP32 to send first reading...');
-      document.getElementById('history-body').innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">⏳ Waiting for ESP32 data... Check that your ESP32 is running and connected to WiFi.</td></tr>';
+    console.log('Firebase data:', data); // Debug log
+    
+    if (!data || data.temp === undefined) {
+      document.getElementById('history-body').innerHTML = 
+        '<tr><td colspan="6" style="text-align:center;color:var(--orange);padding:20px">⚠️ Waiting for ESP32 to send first reading...<br><span style="font-size:11px">Check that your ESP32 is powered on and connected to WiFi</span></td></tr>';
       return;
     }
     
-    // Update main readings
+    // Update all values
     const temp = data.temp;
     const humidity = data.humidity;
     const heatIndex = data.heatIndex;
     const status = data.status || '—';
-    const lastTime = data.lastTime || new Date().toLocaleTimeString();
+    const lastTime = data.lastTime || 'Just now';
+    const hiSource = data.hiSource || 'Open-Meteo (Cavite)';
     
     document.getElementById('val-temp').innerHTML = temp.toFixed(1) + '<span class="card-unit">°C</span>';
     document.getElementById('val-hum').innerHTML = humidity.toFixed(1) + '<span class="card-unit">%</span>';
     document.getElementById('val-hi').innerHTML = heatIndex.toFixed(1) + '<span class="card-unit">°C</span>';
     document.getElementById('sub-temp-f').innerHTML = (temp * 9/5 + 32).toFixed(1) + ' °F';
     document.getElementById('val-time').textContent = lastTime;
-    document.getElementById('hi-source').textContent = data.hiSource || 'Open-Meteo / Cavite';
+    document.getElementById('hi-source').textContent = hiSource;
     document.getElementById('stat-sent').textContent = data.totalSent || 0;
-    document.getElementById('stat-failed').textContent = data.totalFailed || 0;
+    document.getElementById('stat-fail').textContent = data.totalFailed || 0;
     document.getElementById('lastUpdate').textContent = 'Updated: ' + new Date().toLocaleTimeString();
     
     // Badges
-    const sc = statusColor(status);
     document.getElementById('badge-status').textContent = status;
-    document.getElementById('badge-status').className = 'badge badge-' + sc;
+    document.getElementById('badge-status').className = 'badge badge-' + statusColor(status);
     document.getElementById('badge-temp').textContent = temp >= 32 ? 'Hot' : (temp >= 28 ? 'Warm' : 'Cool');
     document.getElementById('badge-hum').textContent = humidity >= 80 ? 'High' : (humidity >= 60 ? 'Moderate' : 'Low');
     
@@ -224,14 +215,12 @@ async function fetchData() {
     const s = uptime % 60;
     document.getElementById('di-uptime').textContent = h + 'h ' + m + 'm ' + s + 's';
     
-    // WiFi status
+    // WiFi status dot
     const wifiConnected = data.wifiConnected;
     document.getElementById('wdot').className = 'wifi-dot' + (wifiConnected ? '' : ' offline');
     document.getElementById('wlabel').textContent = wifiConnected ? (data.ssid || 'WiFi') : 'AP Mode';
-    if (data.rssi) setSignalBars(data.rssi);
     
-    // For history: Firebase only stores current reading by default
-    // We'll show the current reading and note that it's live
+    // Update history table (showing current reading + note)
     const tbody = document.getElementById('history-body');
     tbody.innerHTML = `
       <tr>
@@ -242,18 +231,24 @@ async function fetchData() {
         <td class="hi-val">${heatIndex.toFixed(1)}</td>
         <td><span class="badge badge-${statusColor(status)}" style="padding:2px 8px;font-size:10px">${status}</span></td>
       </tr>
-      <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:10px">📡 Showing latest reading from Firebase. Full history is stored in Google Sheets.</td></tr>
+      <tr>
+        <td colspan="6" style="text-align:center;color:var(--muted);padding:12px;background:var(--surface2)">
+          📌 Firebase stores the latest reading. Full history is saved in Google Sheets.
+          <br>ESP32 sends new data every 5 minutes. Last update: ${new Date().toLocaleString()}
+        </td>
+      </tr>
     `;
     
   } catch (error) {
-    console.error('Firebase fetch error:', error);
-    document.getElementById('history-body').innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--red);padding:20px">❌ Error connecting to Firebase. Check your internet connection.</td></tr>';
+    console.error('Firebase error:', error);
+    document.getElementById('history-body').innerHTML = 
+      '<tr><td colspan="6" style="text-align:center;color:var(--red);padding:20px">❌ Error connecting to Firebase<br><span style="font-size:11px">Check your internet connection. Firebase URL should be accessible.</span></td></tr>';
     document.getElementById('wdot').className = 'wifi-dot offline';
-    document.getElementById('wlabel').textContent = 'Connection Error';
+    document.getElementById('wlabel').textContent = 'Firebase Error';
   }
 }
 
-// Initial fetch and auto-refresh every 30 seconds
+// Fetch immediately and every 30 seconds
 fetchData();
 setInterval(fetchData, 30000);
 </script>
