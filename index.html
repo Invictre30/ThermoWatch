@@ -1,9 +1,11 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ThermoWatch — Live Data from Firebase</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
 :root{
@@ -23,7 +25,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   box-shadow:0 0 6px var(--green);animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .wifi-dot.offline{background:var(--red);box-shadow:0 0 6px var(--red);animation:none}
-.container{max-width:960px;margin:0 auto;padding:24px 20px}
+.container{max-width:1100px;margin:0 auto;padding:24px 20px}
 .grid4{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:20px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 20px}
 .card-label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}
@@ -67,16 +69,25 @@ tr:hover td{background:var(--surface2)}
 .refresh-note{font-size:11px;color:var(--muted);margin-left:auto}
 .status-bar{font-size:11px;color:var(--muted);text-align:center;padding:12px;
   border-top:1px solid var(--border)}
-.signal-bar{display:inline-flex;align-items:flex-end;gap:2px;height:14px;vertical-align:middle;margin-right:4px}
-.sb{width:3px;border-radius:1px;background:var(--border)}
-.sb.on{background:var(--green)}
-.live-badge{background:rgba(63,185,80,.15);color:var(--green);padding:2px 8px;border-radius:20px;font-size:10px;margin-left:8px}
+.live-badge{background:rgba(63,185,80,.15);color:var(--green);padding:2px 8px;
+  border-radius:20px;font-size:10px;margin-left:8px}
+.charts-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:16px;margin-bottom:24px}
+.chart-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 20px}
+.chart-title{font-size:12px;font-family:'Space Mono',monospace;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px}
+.chart-wrap{position:relative;height:220px}
+.session-note{background:rgba(88,166,255,.08);border:1px solid rgba(88,166,255,.2);
+  border-radius:8px;padding:10px 14px;font-size:12px;color:var(--blue);
+  margin-bottom:16px;line-height:1.5}
 </style>
 </head>
 <body>
+
 <div class="topbar">
-  <div class="logo">Thermo<span>Watch</span> <span style="font-size:11px;color:var(--muted)">// Live from Firebase</span>
-    <span class="live-badge">● LIVE DATA</span>
+  <div class="logo">
+    Thermo<span>Watch</span>
+    <span style="font-size:11px;color:var(--muted)">// Live from Firebase</span>
+    <span class="live-badge">● LIVE</span>
   </div>
   <div class="wifi-badge">
     <div class="wifi-dot" id="wdot"></div>
@@ -85,12 +96,14 @@ tr:hover td{background:var(--surface2)}
 </div>
 
 <div class="container">
+
   <div class="toolbar">
     <span class="section-title">Live readings (ESP32 → Firebase)</span>
     <span id="lastUpdate" class="refresh-note">—</span>
     <button onclick="fetchData()" class="btn btn-primary">&#8635; Refresh</button>
   </div>
 
+  <!-- Metric cards -->
   <div class="grid4">
     <div class="card">
       <div class="card-label">Temperature</div>
@@ -115,140 +128,300 @@ tr:hover td{background:var(--surface2)}
       <div class="card-value" style="font-size:18px" id="val-time">—</div>
       <div class="card-sub">Logs every 5 min</div>
       <div style="margin-top:8px;font-size:11px;color:var(--muted)">
-        Sent: <span id="stat-sent" style="color:var(--green)">0</span> &nbsp;
-        Failed: <span id="stat-fail" style="color:var(--red)">0</span>
+        Uptime: <span id="di-uptime" style="color:var(--green)">—</span>
       </div>
     </div>
   </div>
 
-  <div class="section-title" style="margin-bottom:12px">Device info</div>
-  <div class="info-grid">
-    <div class="info-card">
-      <div class="info-row"><span class="info-key">MAC Address</span><span class="info-val" id="di-mac">—</span></div>
-      <div class="info-row"><span class="info-key">IP Address</span><span class="info-val" id="di-ip">—</span></div>
-      <div class="info-row"><span class="info-key">Gateway</span><span class="info-val" id="di-gw">—</span></div>
+  <!-- Charts -->
+  <div class="section-title" style="margin-bottom:8px">Charts — session history (builds up as page stays open)</div>
+  <div class="session-note">
+    📡 Firebase stores the <strong>latest reading only</strong>. Charts below accumulate data points
+    each time the page polls (every 30 s). Keep the tab open to build up history.
+    Full history is in your Google Sheets.
+  </div>
+  <div class="charts-grid">
+    <div class="chart-card">
+      <div class="chart-title">Temperature &amp; Humidity &amp; Heat Index</div>
+      <div class="chart-wrap"><canvas id="chartCombined"></canvas></div>
     </div>
-    <div class="info-card">
-      <div class="info-row"><span class="info-key">WiFi SSID</span><span class="info-val" id="di-ssid">—</span></div>
-      <div class="info-row"><span class="info-key">Signal (RSSI)</span><span class="info-val" id="di-rssi">—</span></div>
-      <div class="info-row"><span class="info-key">Uptime</span><span class="info-val" id="di-uptime">—</span></div>
+    <div class="chart-card">
+      <div class="chart-title">Temperature (°C)</div>
+      <div class="chart-wrap"><canvas id="chartTemp"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Heat Index — Open-Meteo (°C)</div>
+      <div class="chart-wrap"><canvas id="chartHI"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Humidity (%)</div>
+      <div class="chart-wrap"><canvas id="chartHum"></canvas></div>
     </div>
   </div>
 
-  <div class="section-title" style="margin-bottom:12px">Reading history (last 50)</div>
+  <!-- Device info -->
+  <div class="section-title" style="margin-bottom:12px">Device info</div>
+  <div class="info-grid">
+    <div class="info-card">
+      <div class="info-row"><span class="info-key">IP Address</span><span class="info-val" id="di-ip">—</span></div>
+      <div class="info-row"><span class="info-key">WiFi SSID</span><span class="info-val" id="di-ssid">—</span></div>
+      <div class="info-row"><span class="info-key">Signal (RSSI)</span><span class="info-val" id="di-rssi">—</span></div>
+    </div>
+    <div class="info-card">
+      <div class="info-row"><span class="info-key">Heat Index Source</span><span class="info-val" id="di-hisrc">—</span></div>
+      <div class="info-row"><span class="info-key">Firebase Status</span><span class="info-val" id="di-fbstatus" style="color:var(--green)">Connected</span></div>
+      <div class="info-row"><span class="info-key">Last Poll</span><span class="info-val" id="di-lastpoll">—</span></div>
+    </div>
+  </div>
+
+  <!-- Latest reading table -->
+  <div class="section-title" style="margin-bottom:12px">Latest reading from Firebase</div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>#</th><th>Time</th><th>Temp °C</th><th>Humidity %</th><th>Heat Index *</th><th>Status</th></tr></thead>
-      <tbody id="history-body"><tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">⏳ Loading live data from Firebase...<br><span style="font-size:11px">Make sure your ESP32 is running and connected to WiFi</span></td></tr</tbody>
+      <thead>
+        <tr><th>#</th><th>Time</th><th>Temp °C</th><th>Humidity %</th><th>Heat Index *</th><th>Status</th></tr>
+      </thead>
+      <tbody id="history-body">
+        <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">
+          ⏳ Loading live data from Firebase...<br>
+          <span style="font-size:11px">Make sure your ESP32 is running and connected to WiFi</span>
+        </td></tr>
+      </tbody>
     </table>
   </div>
   <p style="font-size:11px;color:var(--muted);margin-bottom:20px">
     * Heat Index sourced from Open-Meteo weather API (Cavite, PH). Data is pushed from your ESP32 every 5 minutes.
   </p>
+
 </div>
 
 <div class="status-bar">
   ThermoWatch v2 &nbsp;·&nbsp; ESP32 + DHT11 &nbsp;·&nbsp;
   Auto-refresh every 30s &nbsp;·&nbsp;
   📡 <strong>READING FROM FIREBASE</strong> &nbsp;·&nbsp;
-  <a href="https://thermowatch0-default-rtdb.asia-southeast1.firebasedatabase.app/live.json" target="_blank" style="color:var(--blue)">View Raw JSON</a>
+  <a href="https://thermowatch0-default-rtdb.asia-southeast1.firebasedatabase.app/live.json"
+     target="_blank" style="color:var(--blue)">View Raw JSON</a>
 </div>
 
 <script>
-// YOUR FIREBASE URL - reading directly from your database
 const FIREBASE_URL = 'https://thermowatch0-default-rtdb.asia-southeast1.firebasedatabase.app/live.json';
+const MAX_POINTS   = 50;   // max data points to keep on charts
 
+// ── Session history (accumulates while page is open) ─────────────────────
+var sessionLabels = [];
+var sessionTemps  = [];
+var sessionHums   = [];
+var sessionHIs    = [];
+var lastUptime    = -1;   // detect when ESP32 sends a new reading
+
+// ── Chart.js setup ────────────────────────────────────────────────────────
+Chart.defaults.color        = '#8b949e';
+Chart.defaults.borderColor  = '#30363d';
+Chart.defaults.font.family  = "'DM Sans', sans-serif";
+Chart.defaults.font.size    = 11;
+
+function lineOpts(yLabel, yMin, yMax, extraScales) {
+  var scales = {
+    x: { ticks: { maxTicksLimit: 8, maxRotation: 45 }, grid: { color: '#21262d' } },
+    y: { title: { display: true, text: yLabel, color: '#8b949e' },
+         min: yMin, max: yMax, grid: { color: '#21262d' } }
+  };
+  if (extraScales) Object.assign(scales, extraScales);
+  return {
+    responsive: true, maintainAspectRatio: false, animation: { duration: 400 },
+    plugins: { legend: { position: 'top', labels: { boxWidth: 12, padding: 14 } } },
+    scales: scales
+  };
+}
+
+var chartCombined = new Chart(document.getElementById('chartCombined'), {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      { label: 'Temperature (°C)', data: [], borderColor: '#58a6ff',
+        backgroundColor: 'rgba(88,166,255,.08)', borderWidth: 2, pointRadius: 3,
+        tension: 0.3, yAxisID: 'y' },
+      { label: 'Humidity (%)',     data: [], borderColor: '#f0883e',
+        backgroundColor: 'rgba(240,136,62,.08)', borderWidth: 2, pointRadius: 3,
+        tension: 0.3, yAxisID: 'y1' },
+      { label: 'Heat Index (°C)', data: [], borderColor: '#d29922',
+        backgroundColor: 'rgba(210,153,34,.08)', borderWidth: 2, pointRadius: 3,
+        tension: 0.3, yAxisID: 'y' }
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: { duration: 400 },
+    plugins: { legend: { position: 'top', labels: { boxWidth: 12, padding: 14 } } },
+    scales: {
+      x:  { ticks: { maxTicksLimit: 8, maxRotation: 45 }, grid: { color: '#21262d' } },
+      y:  { title: { display: true, text: '°C', color: '#8b949e' }, min: 0, max: 60,
+            grid: { color: '#21262d' }, position: 'left' },
+      y1: { title: { display: true, text: '%',  color: '#8b949e' }, min: 0, max: 100,
+            grid: { drawOnChartArea: false }, position: 'right' }
+    }
+  }
+});
+
+var chartTemp = new Chart(document.getElementById('chartTemp'), {
+  type: 'line',
+  data: { labels: [], datasets: [
+    { label: 'Temperature (°C)', data: [], borderColor: '#58a6ff',
+      backgroundColor: 'rgba(88,166,255,.08)', borderWidth: 2, pointRadius: 3, tension: 0.3 }
+  ]},
+  options: lineOpts('°C', 0, 60)
+});
+
+var chartHI = new Chart(document.getElementById('chartHI'), {
+  type: 'line',
+  data: { labels: [], datasets: [
+    { label: 'Heat Index (°C)', data: [], borderColor: '#d29922',
+      backgroundColor: 'rgba(210,153,34,.08)', borderWidth: 2, pointRadius: 3, tension: 0.3 }
+  ]},
+  options: lineOpts('°C', 0, 60)
+});
+
+var chartHum = new Chart(document.getElementById('chartHum'), {
+  type: 'line',
+  data: { labels: [], datasets: [
+    { label: 'Humidity (%)', data: [], borderColor: '#f0883e',
+      backgroundColor: 'rgba(240,136,62,.08)', borderWidth: 2, pointRadius: 3, tension: 0.3 }
+  ]},
+  options: lineOpts('%', 0, 100)
+});
+
+function pushToCharts(label, temp, hum, hi) {
+  sessionLabels.push(label);
+  sessionTemps.push(temp);
+  sessionHums.push(hum);
+  sessionHIs.push(hi);
+
+  // Cap at MAX_POINTS
+  if (sessionLabels.length > MAX_POINTS) {
+    sessionLabels.shift(); sessionTemps.shift();
+    sessionHums.shift();   sessionHIs.shift();
+  }
+
+  chartCombined.data.labels            = sessionLabels;
+  chartCombined.data.datasets[0].data  = sessionTemps;
+  chartCombined.data.datasets[1].data  = sessionHums;
+  chartCombined.data.datasets[2].data  = sessionHIs;
+  chartCombined.update();
+
+  chartTemp.data.labels           = sessionLabels;
+  chartTemp.data.datasets[0].data = sessionTemps;
+  chartTemp.update();
+
+  chartHI.data.labels           = sessionLabels;
+  chartHI.data.datasets[0].data = sessionHIs;
+  chartHI.update();
+
+  chartHum.data.labels           = sessionLabels;
+  chartHum.data.datasets[0].data = sessionHums;
+  chartHum.update();
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
 function statusColor(s) {
   if (s === 'Danger' || s === 'Very Hot') return 'red';
-  if (s === 'Warm') return 'orange';
+  if (s === 'Warm')        return 'orange';
   if (s === 'Comfortable') return 'green';
   return 'blue';
 }
 
+// ── Main fetch ────────────────────────────────────────────────────────────
 async function fetchData() {
   try {
-    const response = await fetch(FIREBASE_URL);
-    const data = await response.json();
-    
-    console.log('Firebase data:', data); // Debug log
-    
+    var response = await fetch(FIREBASE_URL);
+    var data     = await response.json();
+
     if (!data || data.temp === undefined) {
-      document.getElementById('history-body').innerHTML = 
-        '<tr><td colspan="6" style="text-align:center;color:var(--orange);padding:20px">⚠️ Waiting for ESP32 to send first reading...<br><span style="font-size:11px">Check that your ESP32 is powered on and connected to WiFi</span></td></tr>';
+      document.getElementById('history-body').innerHTML =
+        '<tr><td colspan="6" style="text-align:center;color:var(--orange);padding:20px">' +
+        '⚠️ Waiting for ESP32 to send first reading...<br>' +
+        '<span style="font-size:11px">Check that your ESP32 is powered on and connected to WiFi</span>' +
+        '</td></tr>';
       return;
     }
-    
-    // Update all values
-    const temp = data.temp;
-    const humidity = data.humidity;
-    const heatIndex = data.heatIndex;
-    const status = data.status || '—';
-    const lastTime = data.lastTime || 'Just now';
-    const hiSource = data.hiSource || 'Open-Meteo (Cavite)';
-    
-    document.getElementById('val-temp').innerHTML = temp.toFixed(1) + '<span class="card-unit">°C</span>';
-    document.getElementById('val-hum').innerHTML = humidity.toFixed(1) + '<span class="card-unit">%</span>';
-    document.getElementById('val-hi').innerHTML = heatIndex.toFixed(1) + '<span class="card-unit">°C</span>';
-    document.getElementById('sub-temp-f').innerHTML = (temp * 9/5 + 32).toFixed(1) + ' °F';
-    document.getElementById('val-time').textContent = lastTime;
-    document.getElementById('hi-source').textContent = hiSource;
-    document.getElementById('stat-sent').textContent = data.totalSent || 0;
-    document.getElementById('stat-fail').textContent = data.totalFailed || 0;
-    document.getElementById('lastUpdate').textContent = 'Updated: ' + new Date().toLocaleTimeString();
-    
-    // Badges
-    document.getElementById('badge-status').textContent = status;
-    document.getElementById('badge-status').className = 'badge badge-' + statusColor(status);
-    document.getElementById('badge-temp').textContent = temp >= 32 ? 'Hot' : (temp >= 28 ? 'Warm' : 'Cool');
-    document.getElementById('badge-hum').textContent = humidity >= 80 ? 'High' : (humidity >= 60 ? 'Moderate' : 'Low');
-    
+
+    var temp      = parseFloat(data.temp);
+    var humidity  = parseFloat(data.humidity);
+    var heatIndex = parseFloat(data.heatIndex);
+    var status    = data.status   || '—';
+    var hiSource  = data.hiSource || 'Open-Meteo (Cavite)';
+    var uptime    = data.uptime   || 0;
+    var timeLabel = new Date().toLocaleTimeString();
+
+    // Only add a new chart point if uptime changed (new reading from ESP32)
+    if (uptime !== lastUptime) {
+      lastUptime = uptime;
+      pushToCharts(timeLabel, temp, humidity, heatIndex);
+    }
+
+    // Cards
+    document.getElementById('val-temp').innerHTML  = temp.toFixed(1) + '<span class="card-unit">°C</span>';
+    document.getElementById('val-hum').innerHTML   = humidity.toFixed(1) + '<span class="card-unit">%</span>';
+    document.getElementById('val-hi').innerHTML    = heatIndex.toFixed(1) + '<span class="card-unit">°C</span>';
+    document.getElementById('sub-temp-f').textContent = (temp * 9/5 + 32).toFixed(1) + ' °F';
+    document.getElementById('val-time').textContent   = timeLabel;
+    document.getElementById('hi-source').textContent  = hiSource;
+    document.getElementById('lastUpdate').textContent = 'Updated: ' + timeLabel;
+
+    var sc = statusColor(status);
+    document.getElementById('badge-status').textContent  = status;
+    document.getElementById('badge-status').className    = 'badge badge-' + sc;
+    document.getElementById('badge-temp').textContent    = temp >= 32 ? 'Hot' : (temp >= 28 ? 'Warm' : 'Cool');
+    document.getElementById('badge-hum').textContent     = humidity >= 80 ? 'High' : (humidity >= 60 ? 'Moderate' : 'Low');
+
     // Device info
-    document.getElementById('di-mac').textContent = data.mac || '—';
-    document.getElementById('di-ip').textContent = data.ip || '—';
-    document.getElementById('di-gw').textContent = data.gateway || '—';
-    document.getElementById('di-ssid').textContent = data.ssid || '—';
-    document.getElementById('di-rssi').textContent = data.rssi ? data.rssi + ' dBm' : '—';
-    
-    const uptime = data.uptime || 0;
-    const h = Math.floor(uptime / 3600);
-    const m = Math.floor((uptime % 3600) / 60);
-    const s = uptime % 60;
+    document.getElementById('di-ip').textContent     = data.ip   || '—';
+    document.getElementById('di-ssid').textContent   = data.ssid || '—';
+    document.getElementById('di-rssi').textContent   = data.rssi ? data.rssi + ' dBm' : '—';
+    document.getElementById('di-hisrc').textContent  = hiSource;
+    document.getElementById('di-lastpoll').textContent = timeLabel;
+
+    var h = Math.floor(uptime / 3600);
+    var m = Math.floor((uptime % 3600) / 60);
+    var s = uptime % 60;
     document.getElementById('di-uptime').textContent = h + 'h ' + m + 'm ' + s + 's';
-    
-    // WiFi status dot
-    const wifiConnected = data.wifiConnected;
-    document.getElementById('wdot').className = 'wifi-dot' + (wifiConnected ? '' : ' offline');
-    document.getElementById('wlabel').textContent = wifiConnected ? (data.ssid || 'WiFi') : 'AP Mode';
-    
-    // Update history table (showing current reading + note)
-    const tbody = document.getElementById('history-body');
-    tbody.innerHTML = `
-      <tr>
-        <td style="color:var(--muted)">1</td>
-        <td>${lastTime}</td>
-        <td class="temp-val">${temp.toFixed(1)}</td>
-        <td class="hum-val">${humidity.toFixed(1)}</td>
-        <td class="hi-val">${heatIndex.toFixed(1)}</td>
-        <td><span class="badge badge-${statusColor(status)}" style="padding:2px 8px;font-size:10px">${status}</span></td>
-      </tr>
-      <tr>
-        <td colspan="6" style="text-align:center;color:var(--muted);padding:12px;background:var(--surface2)">
-          📌 Firebase stores the latest reading. Full history is saved in Google Sheets.
-          <br>ESP32 sends new data every 5 minutes. Last update: ${new Date().toLocaleString()}
-        </td>
-      </tr>
-    `;
-    
-  } catch (error) {
-    console.error('Firebase error:', error);
-    document.getElementById('history-body').innerHTML = 
-      '<tr><td colspan="6" style="text-align:center;color:var(--red);padding:20px">❌ Error connecting to Firebase<br><span style="font-size:11px">Check your internet connection. Firebase URL should be accessible.</span></td></tr>';
-    document.getElementById('wdot').className = 'wifi-dot offline';
-    document.getElementById('wlabel').textContent = 'Firebase Error';
+
+    // WiFi dot
+    document.getElementById('wdot').className    = 'wifi-dot';
+    document.getElementById('wlabel').textContent = data.ssid || 'Firebase';
+    document.getElementById('di-fbstatus').textContent = 'Connected';
+    document.getElementById('di-fbstatus').style.color = 'var(--green)';
+
+    // Latest reading table
+    document.getElementById('history-body').innerHTML =
+      '<tr>' +
+        '<td style="color:var(--muted)">1</td>' +
+        '<td>' + timeLabel + '</td>' +
+        '<td class="temp-val">' + temp.toFixed(1) + '</td>' +
+        '<td class="hum-val">'  + humidity.toFixed(1) + '</td>' +
+        '<td class="hi-val">'   + heatIndex.toFixed(1) + '</td>' +
+        '<td><span class="badge badge-' + sc + '" style="padding:2px 8px;font-size:10px">' + status + '</span></td>' +
+      '</tr>' +
+      '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:10px;' +
+        'background:var(--surface2);font-size:11px">' +
+        '📌 Firebase stores the latest reading only. ' +
+        'Full history is saved in Google Sheets. ' +
+        'Charts above grow as the page stays open.' +
+      '</td></tr>';
+
+  } catch (err) {
+    console.error('Firebase error:', err);
+    document.getElementById('history-body').innerHTML =
+      '<tr><td colspan="6" style="text-align:center;color:var(--red);padding:20px">' +
+      '❌ Error connecting to Firebase<br>' +
+      '<span style="font-size:11px">Check your internet connection.</span>' +
+      '</td></tr>';
+    document.getElementById('wdot').className        = 'wifi-dot offline';
+    document.getElementById('wlabel').textContent    = 'Firebase Error';
+    document.getElementById('di-fbstatus').textContent = 'Error';
+    document.getElementById('di-fbstatus').style.color = 'var(--red)';
   }
 }
 
-// Fetch immediately and every 30 seconds
 fetchData();
 setInterval(fetchData, 30000);
 </script>
